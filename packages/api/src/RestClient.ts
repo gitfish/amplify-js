@@ -37,6 +37,16 @@ export class RestClient {
     private _region: string = 'us-east-1'; // this will be updated by endpoint function
     private _service: string = 'execute-api'; // this can be updated by endpoint function
     private _custom_header = undefined; // this can be updated by endpoint function
+    private _clockSkewErrorCodes: string[] = [
+        'RequestTimeTooSkewed',
+        'RequestExpired',
+        'InvalidSignatureException',
+        'SignatureDoesNotMatch',
+        'AuthFailure',
+        'RequestInTheFuture'
+    ];
+    private _clockOffset : number;
+
     /**
     * @param {RestClientOptions} [options] - Instance options
     */
@@ -239,6 +249,10 @@ export class RestClient {
 
     /** private methods **/
 
+    private _isClockSkewError(error : any) {
+        return error && error.code && this._clockSkewErrorCodes.indexOf(error.code) >= 0;
+    }
+
     private _signed(params, credentials, isAllResponse) {
 
         const { signerServiceInfo: signerServiceInfoParams, ...otherParams } = params;
@@ -259,7 +273,7 @@ export class RestClient {
 
         const signerServiceInfo = Object.assign(endpointInfo, signerServiceInfoParams);
 
-        const signed_params = Signer.sign(otherParams, creds, signerServiceInfo);
+        const signed_params = Signer.sign({ ...otherParams, clockOffset: this._clockOffset }, creds, signerServiceInfo);
 
         if (signed_params.data) {
             signed_params.body = signed_params.data;
@@ -268,12 +282,23 @@ export class RestClient {
         logger.debug('Signed Request: ', signed_params);
 
         delete signed_params.headers['host'];
-        return axios(signed_params)
-            .then(response => isAllResponse ? response : response.data)
-            .catch((error) => {
-                logger.debug(error);
-                throw error;
-            });
+
+        return this._request(signed_params).catch(error => {
+            // TODO: move to generic error handler
+            const response = error.response;
+            if(response) {
+                const serviceError = response.data;
+                if(this._isClockSkewError(serviceError) && this._clockOffset === undefined) {
+                    const dateHeader = response.headers ? response.headers.date || response.headers.Date : undefined;
+                    if(dateHeader) {
+                        const serverTime = Date.parse(dateHeader);
+                        this._clockOffset = serverTime - Date.now();
+                        return this._signed(params, credentials, isAllResponse);
+                    }
+                }
+            }
+            throw error;
+        });
     }
 
     private _request(params, isAllResponse = false) {
