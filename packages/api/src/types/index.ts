@@ -64,6 +64,8 @@ export interface apiOptions {
     headers: object;
     endpoints: object;
     credentials?: object;
+    clockOffset?: number;
+    signDateGetter?: () => Date;
 }
 
 export interface GraphQLOptions {

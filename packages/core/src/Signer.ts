@@ -270,12 +270,9 @@ service_info: {
 const sign = function(request, access_info, service_info = null) {
     request.headers = request.headers || {};
 
-    // datetime string and date string
-    const dt = new Date();
-    if(request.clockOffset) {
-        dt.setTime(dt.getTime() + request.clockOffset);
-    }
-    const dt_str = dt.toISOString().replace(/[:\-]|\.\d{3}/g, ''),
+    const signDateGetter = access_info ? access_info.signDateGetter : undefined;
+    const dt = signDateGetter ? signDateGetter() : new Date();
+    const dt_str = dt.toISOString().replace(/[:\-]|\.\d{3}/g, '');
     const d_str = dt_str.substr(0, 8);
 
     const url_info = url.parse(request.url);

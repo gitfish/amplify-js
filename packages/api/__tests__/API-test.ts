@@ -992,9 +992,14 @@ describe('API test', () => {
         test('non-default timeout', async () => {
             const resp = { data: [{ name: 'Bob' }] };
 
+            const testSignDateGetter = () => {
+                return new Date();
+            };
+
             const options = {
                 aws_project_region: 'region',
-                aws_cloud_logic_custom
+                aws_cloud_logic_custom,
+                signDateGetter: testSignDateGetter
             };
 
             const api = new API(options);
@@ -1033,7 +1038,7 @@ describe('API test', () => {
                 timeout: 2500
             }
             await api.get('apiName', '/items', init);
-            const expectedParams = {"data": null, "headers": {}, "host": undefined, "method": "GET", "path": "/", "responseType": "json", "url": "endpoint/items", "timeout": 2500};
+            const expectedParams = {"data": null, "headers": {}, "host": undefined, "method": "GET", "path": "/", "responseType": "json", "url": "endpoint/items", "timeout": 2500, signDateGetter: testSignDateGetter };
             expect(spyonSigner).toBeCalledWith( expectedParams, creds2 , { region: 'us-east-1', service: 'execute-api'});
         });
 
