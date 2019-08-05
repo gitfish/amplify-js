@@ -14,7 +14,7 @@
 import { ConsoleLogger as Logger, Signer, Platform, Credentials } from '@aws-amplify/core';
 
 import { RestClientOptions, AWSCredentials, apiOptions } from './types';
-import axios from 'axios';
+import axios, { AxiosResponse } from 'axios';
 
 const logger = new Logger('RestClient'),
     urlLib = require('url');
@@ -248,8 +248,15 @@ export class RestClient {
 
     /** private methods **/
 
-    private _isClockSkewError(error : any) {
-        return error && error.code && this._clockSkewErrorCodes.indexOf(error.code) >= 0;
+    private _isClockSkewError(response : AxiosResponse) {
+        let errorCode = response.headers ? response.headers("x-amzn-errortype") : undefined;
+        if(!errorCode) {
+            if(response.data) {
+                errorCode = response.data.code;
+            }
+        }
+        logger.debug(`Error code resolved from response: ${errorCode}`);
+        return errorCode ? this._clockSkewErrorCodes.indexOf(errorCode) >= 0 : false;
     }
 
     get correctClockSkew() : boolean {
@@ -264,7 +271,6 @@ export class RestClient {
         const dt = this._options.requestDateGetter ?
             this._options.requestDateGetter() : new Date();
         if(this.clockOffset && this.correctClockSkew) {
-            logger.debug("Adjusting time for clock skew");
             dt.setTime(dt.getTime() + this.clockOffset);
         }
         return dt;
@@ -308,12 +314,12 @@ export class RestClient {
             // TODO: move to generic error handler
             const response = error.response;
             if(response) {
-                const serviceError = response.data;
-                if(this._isClockSkewError(serviceError) && this.correctClockSkew) {
+                if(this._isClockSkewError(response) && this.correctClockSkew) {
                     const dateHeader = response.headers ? response.headers.date || response.headers.Date : undefined;
                     if(dateHeader) {
                         const serverTime = Date.parse(dateHeader);
                         this._clockOffset = serverTime - Date.now();
+                        logger.debug('Retrying request adjusted for clock skew');
                         return this._signed(params, credentials, isAllResponse);
                     }
                 }
