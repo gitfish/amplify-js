@@ -990,16 +990,17 @@ describe('API test', () => {
         });
 
         test('non-default timeout', async () => {
-            const resp = { data: [{ name: 'Bob' }] };
+            const resp = { data: [{ name: 'Bob' }] }
 
-            const testSignDateGetter = () => {
-                return new Date();
-            };
+            const requestDate = new Date();
 
             const options = {
                 aws_project_region: 'region',
                 aws_cloud_logic_custom,
-                signDateGetter: testSignDateGetter
+                correctClockSkew: false,
+                requestDateGetter() {
+                    return requestDate
+                }
             };
 
             const api = new API(options);
@@ -1038,16 +1039,22 @@ describe('API test', () => {
                 timeout: 2500
             }
             await api.get('apiName', '/items', init);
-            const expectedParams = {"data": null, "headers": {}, "host": undefined, "method": "GET", "path": "/", "responseType": "json", "url": "endpoint/items", "timeout": 2500, signDateGetter: testSignDateGetter };
+            const expectedParams = {"data": null, date: requestDate, "headers": {}, "host": undefined, "method": "GET", "path": "/", "responseType": "json", "url": "endpoint/items", "timeout": 2500 };
             expect(spyonSigner).toBeCalledWith( expectedParams, creds2 , { region: 'us-east-1', service: 'execute-api'});
         });
 
         test('query-string on init', async () => {
             const resp = { data: [{ name: 'Bob' }] };
 
+            const requestDate = new Date();
+
             const options = {
                 aws_project_region: 'region',
-                aws_cloud_logic_custom
+                aws_cloud_logic_custom,
+                correctClockSkew: false,
+                requestDateGetter() {
+                    return requestDate;
+                }
             };
 
             const api = new API(options);
@@ -1088,7 +1095,7 @@ describe('API test', () => {
                 }
             }
             await api.get('apiName', '/items', init);
-            const expectedParams = {"data": null, "headers": {}, "host": undefined, "method": "GET", "path": "/", "responseType": "json", "url": "endpoint/items?ke%3Ay3=val%3Aue%203", "timeout": 0};
+            const expectedParams = {"data": null, date: requestDate, "headers": {}, "host": undefined, "method": "GET", "path": "/", "responseType": "json", "url": "endpoint/items?ke%3Ay3=val%3Aue%203", "timeout": 0};
             expect(spyonSigner).toBeCalledWith( expectedParams, creds2 , { region: 'us-east-1', service: 'execute-api'});
         });
 
@@ -1147,9 +1154,15 @@ describe('API test', () => {
         test('query-string on init and url', async () => {
             const resp = { data: [{ name: 'Bob' }] };
 
+            const requestDate = new Date();
+
             const options = {
                 aws_project_region: 'region',
-                aws_cloud_logic_custom
+                aws_cloud_logic_custom,
+                correctClockSkew: false,
+                requestDateGetter() {
+                    return requestDate;
+                }
             };
 
             const api = new API(options);
@@ -1190,9 +1203,71 @@ describe('API test', () => {
                 }
             }
             await api.get('apiName', '/items?key1=value1&key2=value', init);
-            const expectedParams = {"data": null, "headers": {}, "host": undefined, "method": "GET", "path": "/", "responseType": "json", "url": "endpoint/items?key1=value1&key2=value2_real", "timeout": 0};
+            const expectedParams = {"data": null, "date": requestDate, "headers": {}, "host": undefined, "method": "GET", "path": "/", "responseType": "json", "url": "endpoint/items?key1=value1&key2=value2_real", "timeout": 0 };
             expect(spyonSigner).toBeCalledWith( expectedParams, creds2 , { region: 'us-east-1', service: 'execute-api'});
         });
+
+        test('correct clock skew', async () => {
+            const resp = { data: [{ name: 'Bob' }] };
+
+            const requestDate = new Date();
+
+            const options = {
+                aws_project_region: 'region',
+                aws_cloud_logic_custom,
+                correctClockSkew: true,
+                clockOffset: 42000,
+                requestDateGetter() {
+                    return requestDate;
+                }
+            };
+
+            const api = new API(options);
+            const creds = {
+                secretAccessKey: 'secret',
+                accessKeyId: 'access',
+                sessionToken: 'token'
+            };
+
+            const creds2 = {
+                secret_key: 'secret',
+                access_key: 'access',
+                session_token: 'token'
+            };
+
+            const spyon = jest.spyOn(Credentials, 'get').mockImplementation(() => {
+                return new Promise((res, rej) => {
+                    res(creds);
+                });
+            });
+
+            const spyon3 = jest.spyOn(RestClient.prototype, 'endpoint').mockImplementationOnce(() => {
+                return 'endpoint';
+            });
+            const spyonSigner = jest.spyOn(Signer, 'sign').mockImplementationOnce(() => {
+                return { headers: {} };
+            });
+
+            const spyAxios = jest.spyOn(axios, 'default').mockImplementationOnce(() => {
+                return new Promise((res, rej) => {
+                    res(resp);
+                });
+            });
+
+            const init = {
+                queryStringParameters: {
+                    'key2': 'value2_real'
+                }
+            }
+
+            const correctedRequestDate = new Date();
+            correctedRequestDate.setTime(correctedRequestDate.getTime() + options.clockOffset);
+
+            await api.get('apiName', '/items?key1=value1&key2=value', init);
+            const expectedParams = {"data": null, "date": correctedRequestDate, "headers": {}, "host": undefined, "method": "GET", "path": "/", "responseType": "json", "url": "endpoint/items?key1=value1&key2=value2_real", "timeout": 0 };
+            expect(spyonSigner).toBeCalledWith( expectedParams, creds2 , { region: 'us-east-1', service: 'execute-api'});
+
+        })
 
         test('endpoint length 0', async () => {
             const api = new API(config);

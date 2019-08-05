@@ -270,8 +270,7 @@ service_info: {
 const sign = function(request, access_info, service_info = null) {
     request.headers = request.headers || {};
 
-    const signDateGetter = access_info ? access_info.signDateGetter : undefined;
-    const dt = signDateGetter ? signDateGetter() : new Date();
+    const dt = request.date || new Date();
     const dt_str = dt.toISOString().replace(/[:\-]|\.\d{3}/g, '');
     const d_str = dt_str.substr(0, 8);
 

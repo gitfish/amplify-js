@@ -252,24 +252,22 @@ export class RestClient {
         return error && error.code && this._clockSkewErrorCodes.indexOf(error.code) >= 0;
     }
 
+    get correctClockSkew() : boolean {
+        return this._options.correctClockSkew !== undefined ? this._options.correctClockSkew : true;
+    }
+
     get clockOffset() {
         return this._clockOffset || this._options.clockOffset;
     }
 
-    private _defaultSignDateGetter = () => {
-        const r = new Date();
-        if(this.clockOffset) {
+    private _getRequestDate() : Date {
+        const dt = this._options.requestDateGetter ?
+            this._options.requestDateGetter() : new Date();
+        if(this.clockOffset && this.correctClockSkew) {
             logger.debug("Adjusting time for clock skew");
-            r.setTime(r.getTime() + this.clockOffset);
+            dt.setTime(dt.getTime() + this.clockOffset);
         }
-        return r;
-    }
-
-    private _getSignDate = () => {
-        if(this._options.signDateGetter) {
-            return this._options.signDateGetter();
-        }
-        return this._defaultSignDateGetter();
+        return dt;
     }
 
     private _signed(params, credentials, isAllResponse) {
@@ -282,8 +280,7 @@ export class RestClient {
         const accessInfo = {
             secret_key: credentials.secretAccessKey,
             access_key: credentials.accessKeyId,
-            session_token: credentials.sessionToken,
-            signDateGetter: this._getSignDate
+            session_token: credentials.sessionToken
         };
 
         const endpointInfo = {
@@ -293,7 +290,11 @@ export class RestClient {
 
         const signerServiceInfo = Object.assign(endpointInfo, signerServiceInfoParams);
 
-        const signed_params = Signer.sign(otherParams, accessInfo, signerServiceInfo);
+        const signed_params = Signer.sign(
+            { ...otherParams, date: this._getRequestDate() },
+            accessInfo,
+            signerServiceInfo
+        );
 
         if (signed_params.data) {
             signed_params.body = signed_params.data;
@@ -308,7 +309,7 @@ export class RestClient {
             const response = error.response;
             if(response) {
                 const serviceError = response.data;
-                if(this._isClockSkewError(serviceError)) {
+                if(this._isClockSkewError(serviceError) && this.correctClockSkew) {
                     const dateHeader = response.headers ? response.headers.date || response.headers.Date : undefined;
                     if(dateHeader) {
                         const serverTime = Date.parse(dateHeader);
