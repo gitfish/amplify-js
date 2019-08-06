@@ -247,16 +247,18 @@ export class RestClient {
     }
 
     /** private methods **/
-
+    // TODO: probably make this pluggable via configuration
     private _isClockSkewError(response : AxiosResponse) {
-        let errorCode = response.headers ? response.headers("x-amzn-errortype") : undefined;
-        if(!errorCode) {
-            if(response.data) {
-                errorCode = response.data.code;
-            }
+        logger.debug("Checking for clock skew error");
+        let errorCode = response.headers ? response.headers["x-amzn-errortype"] : undefined;
+        if(!errorCode && response.data) {
+            errorCode = response.data.code;
         }
-        logger.debug(`Error code resolved from response: ${errorCode}`);
-        return errorCode ? this._clockSkewErrorCodes.indexOf(errorCode) >= 0 : false;
+        logger.debug(`Resolved error code from response: ${errorCode}`);
+        if(errorCode && this._clockSkewErrorCodes.indexOf(errorCode) >= 0) {
+            return true;
+        }
+        return response.data && response.data.message && response.data.message.toLowerCase().indexOf("signature expired") >= 0;
     }
 
     get correctClockSkew() : boolean {
@@ -271,12 +273,13 @@ export class RestClient {
         const dt = this._options.requestDateGetter ?
             this._options.requestDateGetter() : new Date();
         if(this.clockOffset && this.correctClockSkew) {
+            logger.debug(`Adjusting Request Date with Offset: ${this.clockOffset}`);
             dt.setTime(dt.getTime() + this.clockOffset);
         }
         return dt;
     }
 
-    private _signed(params, credentials, isAllResponse) {
+    private _signed(params, credentials, isAllResponse, checkError = true) {
 
         const { signerServiceInfo: signerServiceInfoParams, ...otherParams } = params;
 
@@ -296,8 +299,10 @@ export class RestClient {
 
         const signerServiceInfo = Object.assign(endpointInfo, signerServiceInfoParams);
 
+        const requestDate = this._getRequestDate();
+
         const signed_params = Signer.sign(
-            { ...otherParams, date: this._getRequestDate() },
+            { ...otherParams, date: requestDate },
             accessInfo,
             signerServiceInfo
         );
@@ -311,16 +316,16 @@ export class RestClient {
         delete signed_params.headers['host'];
 
         return this._request(signed_params).catch(error => {
-            // TODO: move to generic error handler
-            const response = error.response;
-            if(response) {
-                if(this._isClockSkewError(response) && this.correctClockSkew) {
+            if(checkError) {
+                // TODO: move to generic, configurable, error handler
+                const response = error.response;
+                if(response && this.correctClockSkew && this._isClockSkewError(response)) {
                     const dateHeader = response.headers ? response.headers.date || response.headers.Date : undefined;
                     if(dateHeader) {
                         const serverTime = Date.parse(dateHeader);
-                        this._clockOffset = serverTime - Date.now();
+                        this._clockOffset = serverTime - requestDate.getTime();
                         logger.debug('Retrying request adjusted for clock skew');
-                        return this._signed(params, credentials, isAllResponse);
+                        return this._signed(params, credentials, isAllResponse, false);
                     }
                 }
             }
